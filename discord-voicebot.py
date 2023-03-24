@@ -1,19 +1,26 @@
 import discord
 import os
 from datetime import datetime,timedelta,timezone
-from discord.ext import commands
+from discord import app_commands
 from dotenv import load_dotenv
+from polly import Polly
+import regex
 
 load_dotenv()
 
 TOKEN = os.environ.get('TOKEN')
+POLLY_VOICE_ID = os.environ.get('POLLY_VOICE_ID')
 UTC = timezone(timedelta(hours=0), "UTC")
-cmd = '.'
 
 intents = discord.Intents.all()
 intents.messages = True
 intents.message_content = True
 client = discord.Client(intents=intents)
+command = app_commands.CommandTree(client)
+# 管理者ID
+OWNER_ID = 311482797053444106
+polly = Polly()
+last_user = None
 
 fourm_channels = {
     '船員募集': '📄船員募集メイン',
@@ -88,6 +95,80 @@ async def on_message(message):
         if k in message.channel.parent.name:
             send_ch = discord.utils.get(message.guild.text_channels, name=fourm_channels[k])
             await send_ch.send(f'{message.author.mention} が <#{message.channel.id}> だってよ！気になるヤツはいるかい？')
+
+
+    await command.tree.sync()
+
+@command.command(name='sync', description='Owner only')
+async def sync(interaction: discord.Interaction):
+    if interaction.user.id == OWNER_ID:
+        await command.sync()
+        print('Command tree synced.')
+    else:
+        await interaction.response.send_message('You must be the owner to use this command!')
+
+@command.command(name='connect', description='ボイスチャットに読み上げBOTを呼びます')
+async def connect(ctx: discord.Interaction):
+    # BOT からの呼び出しには無視
+    if ctx.user.bot:
+        return
+
+    # ボイスチャットをつないでいない人からの呼び出しにはエラーを返す
+    if ctx.user.voice is None:
+        await ctx.response.send_message(f"ボイスチャットチャンネルに接続してからコマンドを実行してください")
+        return
+
+    # 人数無制限以外は入らない
+    if ctx.user.voice.channel.user_limit != 0:
+        await ctx.response.send_message(f"人数無制限のVCで呼び出してください")
+        return
+
+    # 呼び出した人のいるボイスチャットに接続する
+    await ctx.user.voice.channel.connect()
+    await ctx.response.send_message(f"ボイスチャンネル: {ctx.user.voice.channel.name} に接続しました")
+
+@command.command(name='disconnect', description='ボイスチャットから読み上げBOTを切断します')
+async def disconnect(ctx: discord.Interaction):
+    for voice in client.voice_clients:
+        if ctx.user.voice.channel.name == voice.channel.name:
+            await voice.disconnect()
+            await ctx.response.send_message(f"ボイスチャンネル: {ctx.user.voice.channel.name} から切断しました")
+
+@client.event
+async def on_message(message: discord.Message):
+    global last_user
+    # メッセージの送信者がbotだった場合は無視する
+    if message.author.bot:
+        return
+
+    # テキストチャンネルとボイスチャンネルの名前が一致しない場合は何もしない
+    for voice in client.voice_clients:
+        if message.channel.name != voice.channel.name:
+            return
+
+        # 発言者の名前を取得
+        user_name = message.author.display_name
+        name_regex = regex.compile(r'(?:\p{Hiragana}|\p{Katakana}|[ー－])+')
+        matched = name_regex.match(user_name)
+
+        if matched:
+            user_name = matched.group()
+
+        body = message.content
+        # URL が含まれる場合は処理する
+        if 'http' in body:
+            body = 'URL 省略'
+
+        # 最近読み上げた人だったら名前を省略
+        if last_user == user_name:
+           text = f"{body}"
+        else:
+            text = f"{user_name} さんの発言、{body}"
+
+        # 最後に読み上げた人を記録
+        last_user = user_name
+        # 音声を生成して再生
+        message.guild.voice_client.play(discord.FFmpegPCMAudio(polly.create_voice(text, POLLY_VOICE_ID)))
 
 client.run(TOKEN)
 
