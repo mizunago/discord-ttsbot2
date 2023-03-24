@@ -5,6 +5,7 @@ from discord import app_commands
 from dotenv import load_dotenv
 from polly import Polly
 import regex
+import asyncio
 
 load_dotenv()
 
@@ -13,6 +14,7 @@ POLLY_VOICE_ID = os.environ.get('POLLY_VOICE_ID')
 UTC = timezone(timedelta(hours=0), "UTC")
 
 intents = discord.Intents.all()
+intents.members = True
 intents.messages = True
 intents.message_content = True
 client = discord.Client(intents=intents)
@@ -54,6 +56,8 @@ async def on_ready():
 
     print('boot finished')
 
+# TODO: on_thread_create を使って書き直してね☆
+# https://discordpy.readthedocs.io/ja/latest/api.html?highlight=on_message#discord.on_thread_create
 @client.event
 async def on_message(message):
     if message.author == client.user:
@@ -170,6 +174,37 @@ async def on_message(message: discord.Message):
         # 音声を生成して再生
         message.guild.voice_client.play(discord.FFmpegPCMAudio(polly.create_voice(text, POLLY_VOICE_ID)))
 
+@client.event
+async def on_voice_state_update(member, before, after):
+    # BOTがボイスチャットチャンネルに入っているか確認する
+    if len(client.voice_clients) == 0:
+        return
+
+    await asyncio.sleep(5)  # 退出前に5秒待機する（任意の秒数で設定可能）
+    # 自分の入っているボイスチャットが変更になったか調べる
+    for voice in client.voice_clients:
+        # ボイスチャンネルにBOT以外のメンバーが残っているか確認する
+        if len(voice.channel.members) == 1 and voice.channel.members[0] == client.user:
+            # BOT以外のメンバーがいなくなった場合、BOTをボイスチャンネルから退出させる
+            await voice.disconnect()
+            await voice.channel.send(f'{voice.channel.name} から切断しました')
+
+@client.event
+async def on_member_join(member: discord.Member):
+    for server in client.guilds:
+        if not 'Sea of Thieves' in server.name:
+            continue
+
+        send_ch = discord.utils.get(server.channels, name=f'サーバー入退室ログ')
+        await send_ch.send(f'{member.display_name} <@!{member.id}> さんがサーバーに来ました')
+
+@client.event
+async def on_member_remove(member: discord.Member):
+    for server in client.guilds:
+        if not 'Sea of Thieves' in server.name:
+            continue
+
+        send_ch = discord.utils.get(server.channels, name=f'サーバー入退室ログ')
+        await send_ch.send(f'{member.display_name} <@!{member.id}> さんがサーバーから出ていきました')
+
 client.run(TOKEN)
-
-
