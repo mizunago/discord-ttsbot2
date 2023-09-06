@@ -16,6 +16,7 @@ ENV LANG ja_JP.UTF-8
 RUN pip install --upgrade pip
 RUN pip install --upgrade setuptools
 RUN python -m pip install discord.py[voice] python-dotenv boto3 regex
+RUN pip freeze > requirements.txt
 
 COPY discord-voicebot.py /app/
 COPY polly.py /app/
